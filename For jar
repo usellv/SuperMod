@@ -1,0 +1,180 @@
+.github/workflows/build.yml
+name: Build Fabric Mod
+on: [push, pull_request] # Запускать при каждом сохранении
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          java-version: '21'
+          distribution: 'temurin'
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v3
+
+      - name: Build with Gradle
+        run: chmod +x gradlew && ./gradlew build
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: SuperMod-Finished
+          path: build/libs/*.jar
+package com.example;
+
+import com.google.gson.Gson;
+import com.google.gson.GsonBuilder;
+import net.fabricmc.api.ModInitializer;
+import net.fabricmc.api.ClientModInitializer;
+import net.fabricmc.fabric.api.client.keybinding.v1.KeyBindingHelper;
+import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
+import net.fabricmc.loader.api.FabricLoader; // Исправленный импорт
+import net.minecraft.client.MinecraftClient;
+import net.minecraft.client.gui.screen.Screen;
+import net.minecraft.client.gui.widget.ButtonWidget;
+import net.minecraft.client.network.ServerAddress;
+import net.minecraft.client.network.ServerInfo;
+import net.minecraft.client.option.KeyBinding;
+import net.minecraft.client.util.InputUtil;
+import net.minecraft.text.Text;
+import org.lwjgl.glfw.GLFW;
+
+import java.io.*;
+import java.nio.charset.StandardCharsets;
+
+public class SuperMod implements ModInitializer, ClientModInitializer {
+    public static final String ID = "super_mod";
+    public static Config cfg = Config.sync();
+    private static KeyBinding menuKey;
+    private static ServerInfo lastServer;
+
+    @Override
+    public void onInitialize() {
+        // Инициализация общих ресурсов (если нужно)
+    }
+
+    @Override
+    public void onInitializeClient() {
+        // Регистрация клавиши (Правый Shift)
+        menuKey = KeyBindingHelper.registerKeyBinding(new KeyBinding(
+                "Открыть меню", 
+                InputUtil.Type.KEYSYM, 
+                GLFW.GLFW_KEY_RIGHT_SHIFT, 
+                "SuperMod"
+        ));
+
+        // Обработка нажатия
+        ClientTickEvents.END_CLIENT_TICK.register(client -> {
+            while (menuKey.wasPressed()) {
+                client.setScreen(new VisualScreen());
+            }
+            if (client.getCurrentServerEntry() != null) {
+                lastServer = client.getCurrentServerEntry();
+            }
+        });
+    }
+
+    // Макрос на скин
+    public static void runSkinMacro(MinecraftClient client) {
+        if (client.player != null) {
+            client.player.networkHandler.sendChatCommand("skin 1488");
+            client.player.networkHandler.sendChatCommand("hub");
+            new Thread(() -> {
+                try {
+                    Thread.sleep(2000);
+                    if (lastServer != null) {
+                        client.execute(() -> {
+                            net.minecraft.client.gui.screen.multiplayer.ConnectScreen.connect(
+                                    client.currentScreen, client, ServerAddress.parse(lastServer.address), lastServer, false, null);
+                        });
+                    }
+                } catch (InterruptedException e) {}
+            }).start();
+        }
+    }
+
+    // --- КРАСИВОЕ МЕНЮ by usellv ---
+    public static class VisualScreen extends Screen {
+        public VisualScreen() { super(Text.of("Меню Визуалов")); }
+
+        @Override
+        protected void init() {
+            int x = width / 2 - 100;
+            int yOffset = 40;
+
+            // Кнопка макроса
+            addDrawableChild(ButtonWidget.builder(Text.of("§6⚡ §lКрутой скин §6⚡"), b -> {
+                runSkinMacro(client);
+                this.close();
+            }).dimensions(x, yOffset, 200, 20).build());
+
+            // Подсветка блоков
+            addDrawableChild(ButtonWidget.builder(Text.of("§b✦ §fПодсветка: " + (cfg.blockHighlight ? "§aВКЛ" : "§cВЫКЛ")), b -> {
+                cfg.blockHighlight = !cfg.blockHighlight; cfg.save();
+                b.setMessage(Text.of("§b✦ §fПодсветка: " + (cfg.blockHighlight ? "§aВКЛ" : "§cВЫКЛ")));
+            }).dimensions(x, yOffset + 25, 200, 20).build());
+
+            // Эффекты мира
+            addDrawableChild(ButtonWidget.builder(Text.of("§d🌍 §fЭффекты мира: " + (cfg.worldEffects ? "§aВКЛ" : "§cВЫКЛ")), b -> {
+                cfg.worldEffects = !cfg.worldEffects; cfg.save();
+                b.setMessage(Text.of("§d🌍 §fЭффекты мира: " + (cfg.worldEffects ? "§aВКЛ" : "§cВЫКЛ")));
+            }).dimensions(x, yOffset + 50, 200, 20).build());
+
+            // Ось меча
+            addDrawableChild(ButtonWidget.builder(Text.of("§e⚔ §fОсь меча: §b" + (int)cfg.axX + "°"), b -> {
+                cfg.axX = (cfg.axX + 15) % 360; cfg.save();
+                b.setMessage(Text.of("§e⚔ §fОсь меча: §b" + (int)cfg.axX + "°"));
+            }).dimensions(x, yOffset + 75, 200, 20).build());
+
+            // Кнопка выхода
+            addDrawableChild(ButtonWidget.builder(Text.of("§7Закрыть"), b -> this.close()).dimensions(x, yOffset + 110, 200, 20).build());
+        }
+
+        @Override
+        public void render(net.minecraft.client.gui.DrawContext context, int mouseX, int mouseY, float delta) {
+            this.renderBackground(context, mouseX, mouseY, delta);
+            
+            // Красивый заголовок
+            context.drawCenteredTextWithShadow(this.textRenderer, "§f§l--- §d§lVISUAL INTERFACE §f§l---", this.width / 2, 10, 0xFFFFFF);
+            
+            // Твоя подпись
+            context.drawCenteredTextWithShadow(this.textRenderer, "§7by usellv", this.width / 2, this.height - 20, 0xAAAAAA);
+            
+            super.render(context, mouseX, mouseY, delta);
+        }
+    }
+
+    // Система сохранения настроек
+    public static class Config {
+        public boolean blockHighlight = true;
+        public boolean worldEffects = false;
+        public float handX = 0.0f;
+        public float axX = 45;
+
+        private static final Gson GSON = new GsonBuilder().setPrettyPrinting().create();
+        private static final File F = FabricLoader.getInstance().getConfigDir().resolve("supermod.json").toFile();
+
+        public static Config sync() {
+            try { 
+                if (F.exists()) {
+                    return GSON.fromJson(new FileReader(F, StandardCharsets.UTF_8), Config.class);
+                } 
+            } catch (Exception e) {}
+            Config c = new Config(); 
+            c.save(); 
+            return c;
+        }
+
+        public void save() { 
+            try (Writer w = new OutputStreamWriter(new FileOutputStream(F), StandardCharsets.UTF_8)) { 
+                GSON.toJson(this, w); 
+            } catch (Exception e) {} 
+        }
+    }
+}
